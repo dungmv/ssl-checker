@@ -12,75 +12,66 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \SSLDomain.host) private var domains: [SSLDomain]
     
-    @State private var showingAddDomain = false
     @State private var newHost = ""
     @State private var isRefreshing = false
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(domains) { domain in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(domain.host)
-                            .font(.headline)
-                        
-                        HStack {
-                            if let expiry = domain.expiryDate {
-                                Text("Expires: \(expiry, format: .dateTime.day().month().year())")
-                                    .font(.subheadline)
-                                    .foregroundStyle(expiryDateColor(for: expiry))
-                            } else {
-                                Text("No expiry info")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            Spacer()
-                            
-                            Text("Last checked: \(domain.lastChecked, format: .dateTime.hour().minute())")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .onDelete(perform: deleteDomains)
-            }
-            .navigationTitle("SSL Checker")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: { showingAddDomain = true }) {
-                        Label("Add Domain", systemImage: "plus")
-                    }
-                }
-            }
-            .sheet(isPresented: $showingAddDomain) {
-                NavigationStack {
-                    Form {
+                Section {
+                    HStack {
                         TextField("Domain (e.g. google.com)", text: $newHost)
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
-                    }
-                    .navigationTitle("Add Domain")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") {
-                                showingAddDomain = false
-                                newHost = ""
-                            }
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Add") {
+                            .onSubmit {
                                 addDomain()
                             }
-                            .disabled(newHost.isEmpty)
+                        
+                        Button(action: addDomain) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(newHost.isEmpty ? .gray : .blue)
+                        }
+                        .disabled(newHost.isEmpty)
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Add New Domain")
+                }
+
+                Section {
+                    ForEach(domains) { domain in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(domain.host)
+                                .font(.headline)
+                            
+                            HStack {
+                                if let expiry = domain.expiryDate {
+                                    Text("Expires: \(expiry, format: .dateTime.day().month().year())")
+                                        .font(.subheadline)
+                                        .foregroundStyle(expiryDateColor(for: expiry))
+                                } else {
+                                    Text("No expiry info")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                
+                                Spacer()
+                                
+                                Text("Last checked: \(domain.lastChecked, format: .dateTime.hour().minute())")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .onDelete(perform: deleteDomains)
+                } header: {
+                    if !domains.isEmpty {
+                        Text("Monitored Domains")
+                    }
                 }
-                .presentationDetents([.medium])
             }
+            .navigationTitle("SSL Checker")
             .refreshable {
                 await refreshAll()
             }
@@ -99,7 +90,6 @@ struct ContentView: View {
         }
         
         newHost = ""
-        showingAddDomain = false
     }
 
     private func deleteDomains(offsets: IndexSet) {
