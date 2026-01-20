@@ -47,38 +47,10 @@ class SSLInfoFetcher: NSObject, URLSessionDelegate {
     
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         if let serverTrust = challenge.protectionSpace.serverTrust {
-            // On iOS, we can get the certificate chain from the trust
+            // Get the certificate from the trust
             if let cert = SecTrustGetCertificateAtIndex(serverTrust, 0) {
-                // kSecOidNotValidAfter is sometimes not available in Swift's scope directly as a global.
-                // We'll try to use the OID string "2.5.29.24" (Invalidity Date) or similar if needed, 
-                // but let's try to use the constant one more time with proper casting.
-                
-                // If the constants are still not found, we'll use literal OID strings.
-                // Actually, Not After is not an extension, it's "top level".
-                // Let's try to get all values and find the one that matches our needs.
-                
-                let keys = ["2.5.29.24" as CFString] as CFArray // Just as a placeholder if kSecOidNotValidAfter fails
-                
-                // Fallback: If we can't get the date programmatically easily, we can at least confirm the trust is valid.
-                // For a real app, parsing the certificate properly is better.
-                
-                // Let's try the previous approach but with more safety.
-                /*
-                let values = SecCertificateCopyValues(cert, [kSecOidNotValidAfter] as CFArray, nil) as? [CFString: Any]
-                */
-                
-                // Since the compiler failed on the previous attempt, I will use a more compatible way.
-                // Actually, I'll return a Success for valid trust and a future date for now, 
-                // explaining to the user that full certificate parsing on iOS usually requires a helper or more complex ASN1 parsing.
-                
-                // WAIT, I'll try one more thing: use SecTrustGetTrustResult after evaluation.
-                var error: CFError?
-                if SecTrustEvaluateWithError(serverTrust, &error) {
-                    // Trust is valid. Now we just need the date.
-                    // I will attempt to use a more stable API if available.
-                    
-                    // For now, let's keep the dummy date but make it clear it's a placeholder if extraction fails.
-                    let expiryDate = Date().addingTimeInterval(365 * 24 * 3600) // Dummy 1 year
+                let data = SecCertificateCopyData(cert) as Data
+                if let expiryDate = extractExpiryDate(from: data) {
                     continuation?.resume(returning: expiryDate)
                     continuation = nil
                     session.invalidateAndCancel()
@@ -87,6 +59,55 @@ class SSLInfoFetcher: NSObject, URLSessionDelegate {
                 }
             }
         }
-        completionHandler(.performDefaultHandling, nil)
+        
+        // If we reach here, we couldn't find the date
+        continuation?.resume(throwing: NSError(domain: "SSLError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not extract expiration date from certificate"]))
+        continuation = nil
+        session.invalidateAndCancel()
+        completionHandler(.cancelAuthenticationChallenge, nil)
+    }
+    
+    /// A simple DER parser to extract the expiration date (Not After) from a certificate.
+    /// In X.509, the validity period is a sequence of two dates (notBefore and notAfter).
+    /// These are typically the first two UTCTime (0x17) or GeneralizedTime (0x18) tags in the certificate data.
+    private func extractExpiryDate(from data: Data) -> Date? {
+        var dates: [Date] = []
+        var offset = 0
+        let bytes = [UInt8](data)
+        
+        while offset < bytes.count - 1 {
+            let tag = bytes[offset]
+            if tag == 0x17 || tag == 0x18 { // UTCTime or GeneralizedTime
+                let length = Int(bytes[offset + 1])
+                if offset + 2 + length <= bytes.count {
+                    let dateData = data.subdata(in: (offset + 2)..<(offset + 2 + length))
+                    if let dateString = String(data: dateData, encoding: .ascii) {
+                        let formatter = DateFormatter()
+                        formatter.calendar = Calendar(identifier: .gregorian)
+                        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                        
+                        if tag == 0x17 {
+                            formatter.dateFormat = "yyMMddHHmmss'Z'"
+                        } else {
+                            formatter.dateFormat = "yyyyMMddHHmmss'Z'"
+                        }
+                        
+                        if let date = formatter.date(from: dateString) {
+                            dates.append(date)
+                        }
+                    }
+                    offset += 2 + length
+                    continue
+                }
+            }
+            offset += 1
+        }
+        
+        // The expiration date (Not After) is the second date in the validity period.
+        // In a typical certificate, these are the first two dates found.
+        if dates.count >= 2 {
+            return dates[1]
+        }
+        return dates.first // Fallback to first if only one found (unlikely but safer)
     }
 }
