@@ -7,9 +7,53 @@ class SSLService {
     
     private init() {}
     
-    func fetchExpiryDate(for host: String) async throws -> Date? {
+    func fetchSSLInfo(for host: String) async throws -> (expiryDate: Date?, ipAddress: String?) {
         let fetcher = SSLInfoFetcher()
-        return try await fetcher.fetchExpiry(for: host)
+        let expiryDate = try await fetcher.fetchExpiry(for: host)
+        let ip = await resolveIP(for: host)
+        return (expiryDate, ip)
+    }
+    
+    /// Resolve IP address for a given host using DNS lookup
+    func resolveIP(for host: String) async -> String? {
+        let cleanHost = host
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .trimmingCharacters(in: .init(charactersIn: "/ "))
+        
+        return await withCheckedContinuation { continuation in
+            var hints = addrinfo()
+            hints.ai_family = AF_UNSPEC
+            hints.ai_socktype = SOCK_STREAM
+            
+            var res: UnsafeMutablePointer<addrinfo>?
+            let status = getaddrinfo(cleanHost, nil, &hints, &res)
+            
+            guard status == 0, let info = res else {
+                continuation.resume(returning: nil)
+                return
+            }
+            
+            defer { freeaddrinfo(res) }
+            
+            var ipString: String?
+            var ptr = info
+            while true {
+                var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                if getnameinfo(ptr.pointee.ai_addr, ptr.pointee.ai_addrlen,
+                               &hostname, socklen_t(NI_MAXHOST),
+                               nil, 0, NI_NUMERICHOST) == 0 {
+                    ipString = String(cString: hostname)
+                    break
+                }
+                if let next = ptr.pointee.ai_next {
+                    ptr = next
+                } else {
+                    break
+                }
+            }
+            continuation.resume(returning: ipString)
+        }
     }
 }
 

@@ -13,10 +13,12 @@ final class SSLDomain {
     var host: String
     var expiryDate: Date?
     var lastChecked: Date
+    var ipAddress: String?
     
-    init(host: String, expiryDate: Date? = nil, lastChecked: Date = Date()) {
+    init(host: String, expiryDate: Date? = nil, lastChecked: Date = Date(), ipAddress: String? = nil) {
         self.host = host
         self.expiryDate = expiryDate
         self.lastChecked = lastChecked
+        self.ipAddress = ipAddress
     }
 }
